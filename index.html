@@ -349,6 +349,13 @@ details.como summary { min-height: 44px; display: flex; align-items: center; }
   .brand small { font-size: 11.5px; }
   .pasos li { font-size: 10.5px; letter-spacing: 0; }
 }
+/* Evaluaciones en curso */
+ol.curso { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+ol.curso li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; border: 1px solid var(--border-soft); border-left: 3px solid var(--accent); border-radius: 8px; padding: 10px 12px; background: var(--surface); }
+ol.curso li > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+ol.curso li small { color: var(--ink-muted); font-size: 13px; overflow-wrap: anywhere; }
+#en-curso h2 .n { font-family: var(--font-mono); font-size: 13px; color: var(--accent); background: var(--accent-soft); border-radius: 10px; padding: 1px 8px; vertical-align: middle; }
+.evaluando { font-size: 14px; color: var(--ink-muted); margin: 0 0 8px; overflow-wrap: anywhere; }
 </style>
 <div id="app"></div>
 <script>/* docx 9.5.1 (MIT) */
@@ -1874,8 +1881,8 @@ function guardarBorr() { lsSet(LS_BORR, borr); }
 function cargar() {
   const g = lsGet(LS_CASOS);
   casos = Array.isArray(g) ? g.filter(function (c) { return c && c.id; }).map(normalizarCaso) : [];
-  const b = lsGet(LS_BORR);
-  borr = b && b.id ? normalizarCaso(b) : null;
+  cargarBorradores();
+  borr = null;
   const e = lsGet(LS_ELIM);
   eliminados = e && typeof e === 'object' && !Array.isArray(e) ? e : {};
 }
@@ -2092,11 +2099,23 @@ function vInicio() {
   if (!storageOk && nube.estado !== 'ok') {
     h += '<div class="aviso mal"><span>Este navegador no está guardando las evaluaciones. Descarga el respaldo antes de cerrar la página.</span></div>';
   }
-  if (borr) {
-    h += '<div class="aviso"><span>Tienes una evaluación sin terminar: <b class="num">' + esc(borr.codigo) + '</b>' +
-      (tituloCaso(borr) !== 'Sin dirección' ? ' · ' + esc(tituloCaso(borr)) : '') + '</span><span class="acciones">' +
-      '<button type="button" class="btn btn-sm btn-pri" data-act="continuar">Continuar</button>' +
-      '<button type="button" class="btn btn-sm" data-act="descartar">Descartar</button></span></div>';
+  const enCurso = listaBorradores();
+  if (enCurso.length) {
+    h += '<section class="card" id="en-curso"><h2>En curso <span class="n">' + enCurso.length + '</span></h2>' +
+      '<p class="ayuda">Cada evaluación en curso se guarda sola en este dispositivo. Puedes empezar otra y volver a cualquiera cuando quieras.</p><ol class="curso">' +
+      enCurso.map(function (b) {
+        const ce = centroDe(b), paso = b._paso >= 1 && b._paso <= PASOS.length ? b._paso : 1;
+        const nombre = ce ? b.centro + ' · ' + ce.nombre : (tituloCaso(b) !== 'Sin dirección' ? tituloCaso(b) : 'Centro sin elegir');
+        const edita = casoPorId(b.id) ? ' · corrección de la v' + versionDe(casoPorId(b.id)) : '';
+        const hora = b._mod ? new Date(b._mod).toLocaleString('es-EC', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
+        return '<li><div><b>' + esc(nombre) + '</b><small>Paso ' + paso + ' de ' + PASOS.length + ' · ' + esc(PASOS[paso - 1]) + edita +
+          (b.evaluador ? ' · ' + esc(b.evaluador) : '') + (hora ? ' · ' + esc(hora) : '') + '</small></div><span class="acciones">' +
+          (V.descartar === b.id
+            ? '<span class="err">¿Descartar esta evaluación en curso?</span><button type="button" class="btn btn-sm btn-danger" data-act="descartar-si" data-id="' + esc(b.id) + '">Sí, descartar</button><button type="button" class="btn btn-sm" data-act="descartar-no">No</button>'
+            : '<button type="button" class="btn btn-sm btn-pri" data-act="continuar" data-id="' + esc(b.id) + '">Continuar</button>' +
+              '<button type="button" class="btn btn-sm" data-act="descartar" data-id="' + esc(b.id) + '">Descartar</button>') +
+          '</span></li>';
+      }).join('') + '</ol></section>';
   }
 
   const usados = {};
@@ -2177,6 +2196,10 @@ function vAsistente() {
       const n = i + 1;
       return '<li class="' + (n === V.paso ? 'actual' : n < V.paso ? 'hecho' : '') + '"' + (n === V.paso ? ' aria-current="step"' : '') + '>' + n + ' ' + t + '</li>';
     }).join('') + '</ol>';
+  if (V.paso > 1) {
+    const ce = centroDe(borr);
+    h += '<p class="evaluando">Evaluando <b>' + esc(ce ? borr.centro + ' · ' + ce.nombre : borr.codigo) + '</b>' + (borr.evaluador ? ' · ' + esc(borr.evaluador) : '') + '. Se guarda sola mientras avanzas.</p>';
+  }
   h += [paso1, paso2, paso3, paso4, paso5][V.paso - 1]();
   h += '</main><div class="barra"><div class="barra-in">' +
     '<button type="button" class="btn" data-act="atras">' + (V.paso === 1 ? 'Salir' : 'Atrás') + '</button>' +
@@ -2964,8 +2987,8 @@ function validarPaso1() {
   const fam = num(borr.familias);
   if (esVivienda(borr) && (!(fam >= 1) || fam % 1 !== 0)) e.familias = 'Escribe cuántas familias viven ahí.';
   if (borr.centro) {
-    const otra = casos.filter(function (c) { return c.id !== borr.id && c.centro === borr.centro; })[0];
-    if (otra && !e.codigo) e.codigo = 'El centro ' + borr.centro + ' ya tiene la evaluación ' + otra.codigo + '. Edítala y sube la versión.';
+    const otra = otraDelCentro(borr.centro, borr.id);
+    if (otra && !e.codigo) e.codigo = textoOtraDelCentro(borr.centro, otra);
   }
   const ver = num(borr.ver);
   if (!(ver >= 1) || ver % 1 !== 0) e.ver = 'Escribe la versión como número entero: 1, 2…';
@@ -3031,7 +3054,7 @@ function guardarCaso() {
   } else casos.push(borr);
   guardarCasos(); subir(borr);
   const c = borr;
-  V.casoId = borr.id; borr = null; guardarBorr();
+  V.casoId = borr.id; quitarBorr(borr.id);
   V.vista = 'informe'; V.paso = 1; V.abierto = null; V.err = {}; V.recien = true; V.ficha = null;
   render(true);
   toast(codViejo ? 'El código ' + codViejo + ' ya estaba en uso. Se guardó como ' + c.codigo + '.'
@@ -3075,31 +3098,43 @@ async function conOcupado(fn) {
 const ACC = {
   inicio: function () { V.vista = 'inicio'; V.borrar = null; V.recien = false; render(true); },
   nueva: function () {
-    if (borr && V.vista !== 'asistente') { toast('Ya hay una evaluación sin terminar. Continúala o descártala primero.'); V.vista = 'inicio'; V.recien = false; render(true); return; }
-    borr = nuevoCaso(casos); V.vista = 'asistente'; V.paso = 1; V.abierto = null; V.err = {}; V.ficha = null; guardarBorr(); render(true);
+    // Se puede empezar otra evaluación aunque haya otras en curso: cada una se guarda por separado
+    borr = nuevoCaso(casos.concat(listaBorradores())); V.vista = 'asistente'; V.paso = 1; V.abierto = null; V.err = {}; V.ficha = null; V.recien = false; V.descartar = null;
+    guardarBorr(); render(true);
   },
-  continuar: function () { V.vista = 'asistente'; V.paso = borr && borr._paso >= 1 && borr._paso <= PASOS.length ? borr._paso : 1; V.abierto = null; V.err = {}; if (V.paso >= 3) syncMejoras(borr); render(true); },
-  descartar: function () {
-    // Las fotos del borrador que no estén en una evaluación guardada se eliminan
-    if (borr) {
-      const guardado = casoPorId(borr.id), enUso = {};
-      ((guardado && guardado.fotos) || []).forEach(function (f) { enUso[f.id] = true; });
-      (borr.fotos || []).forEach(function (f) { if (!enUso[f.id]) fotoDel(f.id); });
-    }
-    borr = null; guardarBorr(); render(false);
+  continuar: function (id) {
+    const b = id ? borradores[id] : borr;
+    if (!b) { render(false); return; }
+    borr = b; V.vista = 'asistente'; V.paso = b._paso >= 1 && b._paso <= PASOS.length ? b._paso : 1; V.abierto = null; V.err = {}; V.ficha = null; V.recien = false; V.descartar = null;
+    if (V.paso >= 3) syncMejoras(borr);
+    render(true);
+  },
+  descartar: function (id) { V.descartar = id || (borr && borr.id) || null; render(false); },
+  'descartar-no': function () { V.descartar = null; render(false); },
+  'descartar-si': function (id) {
+    const b = borradores[id] || (borr && borr.id === id ? borr : null);
+    V.descartar = null;
+    if (!b) { render(false); return; }
+    // Las fotos de esta evaluación en curso que no estén en una guardada ni en otra en curso se eliminan
+    const uso = fotosEnUso(b.id);
+    (b.fotos || []).forEach(function (f) { if (!uso[f.id]) fotoDel(f.id); });
+    quitarBorr(b.id);
+    if (V.vista === 'asistente') V.vista = 'inicio';
+    render(false); toast('Evaluación en curso descartada.');
   },
   ver: function (id) { V.casoId = id; V.vista = 'informe'; V.recien = false; render(true); },
   editar: function (id) {
-    if (borr && borr.id !== id) { toast('Ya hay una evaluación sin terminar. Continúala o descártala primero.'); V.vista = 'inicio'; V.recien = false; render(true); return; }
+    if (borradores[id]) { ACC.continuar(id); return; }
     const c = casoPorId(id); if (!c) return;
-    borr = normalizarCaso(clon(c)); V.vista = 'asistente'; V.paso = 1; V.abierto = null; V.err = {}; V.ficha = null; guardarBorr(); render(true);
+    borr = normalizarCaso(clon(c)); V.vista = 'asistente'; V.paso = 1; V.abierto = null; V.err = {}; V.ficha = null; V.recien = false; guardarBorr(); render(true);
   },
   borrar: function (id) { V.borrar = id; render(false); },
   'borrar-no': function () { V.borrar = null; render(false); },
   'borrar-si': function (id) {
     const c = casoPorId(id);
-    casos = casos.filter(function (x) { return x.id !== id; }); guardarCasos();
-    if (c) (c.fotos || []).forEach(function (f) { if (!(borr && borr.fotos.some(function (b) { return b.id === f.id; }))) fotoDel(f.id); });
+    casos = casos.filter(function (x) { return x.id !== id; }); marcarBorrada(id); guardarCasos();
+    const uso = fotosEnUso(null);
+    if (c) (c.fotos || []).forEach(function (f) { if (!uso[f.id]) fotoDel(f.id); });
     if (c && !c.ejemplo && (c.sinc || nube.db)) { eliminados[id] = Date.now(); lsSet(LS_ELIM, eliminados); borrarEnNube(id); }
     V.borrar = null; render(false); toast('Evaluación eliminada. Los archivos ya escritos en la carpeta no se borran.');
   },
@@ -3254,9 +3289,9 @@ function alEscribir(ev) {
   if (t.hasAttribute('data-centro')) {
     if (!t.checked) return;
     const kc = t.getAttribute('data-centro');
-    const otra = kc && casos.filter(function (c) { return c.id !== borr.id && c.centro === kc; })[0];
+    const otra = kc && otraDelCentro(kc, borr.id);
     if (otra) {
-      toast('El centro ' + kc + ' ya tiene la evaluación ' + otra.codigo + '. Para una nueva visita o una corrección, edítala y sube la versión.');
+      toast(textoOtraDelCentro(kc, otra));
       const sc0 = window.scrollY; render(false); window.scrollTo(0, sc0);
       return;
     }
@@ -3612,7 +3647,7 @@ function nombresArchivos(c) {
     json: p + '_P2_Respaldo del aplicativo_' + v + '_' + f + '.json',
     seg: p + '_P2_Ficha de seguridad_' + v + '_' + f + '.docx',
     fotos: p + '_P2_Fotos_' + v + '_' + f + '.zip',
-    campo: p + '_P2_Respaldo de campo_' + v + '_' + f,
+    campo: p + '_P2_Respaldo de campo_' + v + '_' + f + '_' + iniciales(c.evaluador),
     zip: p + '_P2_Paquete del aplicativo_' + v + '_' + f + '.zip'
   };
 }
@@ -3640,6 +3675,12 @@ async function guardarEnCarpeta(c, silencioso) {
   if (!c) return false;
   if (!FS.dir) { toast('Conecta primero la carpeta de la consultoría.'); return false; }
   if (FS.estado !== 'ok' && !(await permisoCarpeta())) { toast('Sin permiso para escribir en la carpeta.'); return false; }
+  const dup = duplicadosDe(c);
+  if (dup.length) {
+    toast('Hay ' + (dup.length + 1) + ' evaluaciones del centro ' + c.centro + ' (' + [c].concat(dup).map(function (x) { return x.evaluador || 'sin evaluador'; }).join(', ') +
+      '). No se escriben sus archivos para no sobrescribir: revisa cuál queda y elimina la otra.');
+    return false;
+  }
   try {
     if (!silencioso) toast('Guardando ' + c.codigo + ' en la carpeta…');
     const arch = await archivosCaso(c), cache = {};
@@ -3677,7 +3718,8 @@ async function guardarTodo() {
   for (const c of lista) { toast('Guardando ' + c.codigo + '…'); if (await guardarEnCarpeta(c, true)) ok++; }
   const l2 = lista.filter(function (c) { const ce = centroDe(c); return ce && ce.lote === 'II'; });
   let cons = '';
-  if (l2.length) {
+  const repetidos = l2.some(function (c) { return duplicadosDe(c).length; });
+  if (l2.length && !repetidos) {
     try {
       const d = await dirRuta(CONSOLIDADO_L2);
       const vmax = l2.reduce(function (m, c) { return Math.max(m, versionDe(c)); }, 1);
@@ -3686,7 +3728,7 @@ async function guardarTodo() {
     } catch (e) { cons = ''; if (window.console) console.error(e); }
   }
   render(false);
-  toast('Se guardaron ' + ok + ' de ' + lista.length + ' evaluaciones' + (cons ? ' y la matriz consolidada del Lote II.' : '.'));
+  toast('Se guardaron ' + ok + ' de ' + lista.length + ' evaluaciones' + (cons ? ' y la matriz consolidada del Lote II.' : repetidos ? '. La matriz consolidada del Lote II no se escribió porque hay centros con dos evaluaciones.' : '.'));
 }
 
 async function descargarPaquete(c) {
@@ -3803,7 +3845,7 @@ async function incorporar(j) {
   const lista = Array.isArray(j) ? j : (j && j.casos);
   if (!Array.isArray(lista)) throw new Error('formato');
   let n = 0, nf = 0;
-  const cambiaron = {}, fotoDe = {};
+  const cambiaron = {}, fotoDe = {}, conflictos = [];
   lista.forEach(function (c) { if (c && Array.isArray(c.fotos)) c.fotos.forEach(function (f) { if (f && f.id) fotoDe[f.id] = c.id; }); });
   const fuentes = {};
   if (j.fotos && typeof j.fotos === 'object') Object.keys(j.fotos).forEach(function (id) { fuentes[id] = dataURLABlob(j.fotos[id]); });
@@ -3822,13 +3864,18 @@ async function incorporar(j) {
     if (!c.mod || eliminados[c.id] || muerta(c.id, c.mod)) c.mod = Date.now();
     c.sinc = false;
     const i = casos.findIndex(function (x) { return x.id === c.id; });
+    desmarcarBorrada(c.id);
     if (i >= 0) { if (c.mod > casos[i].mod) { c.carpeta = casos[i].carpeta; casos[i] = c; cambiaron[c.id] = true; } }
-    else { casos.push(c); cambiaron[c.id] = true; }
+    else {
+      const otra = c.centro ? casos.filter(function (x) { return x.centro === c.centro; })[0] : null;
+      if (otra) conflictos.push(c.centro + ' (' + (otra.evaluador || 'sin evaluador') + ' y ' + (c.evaluador || 'sin evaluador') + ')');
+      casos.push(c); cambiaron[c.id] = true;
+    }
     if (eliminados[c.id]) { delete eliminados[c.id]; lsSet(LS_ELIM, eliminados); }
     subir(c);
     n++;
   });
-  return { n: n, nf: nf, cambiaron: Object.keys(cambiaron) };
+  return { n: n, nf: nf, cambiaron: Object.keys(cambiaron), conflictos: conflictos };
 }
 
 /* En la oficina: busca en la carpeta P2 de cada centro los respaldos de campo subidos desde el teléfono,
@@ -3842,7 +3889,7 @@ async function traerCampo() {
   if (!(await permisoCarpeta())) { toast('Sin permiso para leer la carpeta.'); return; }
   toast('Buscando respaldos de campo en las carpetas P2 de los centros…');
   let archivos = 0, n = 0, malos = 0;
-  const cambiaron = {};
+  const cambiaron = {}, conflictosT = [];
   for (const k of Object.keys(CENTROS)) {
     const d = await dirExistente(CENTROS[k].carpeta);
     if (!d) continue;
@@ -3852,6 +3899,7 @@ async function traerCampo() {
       try {
         const res = await incorporar(JSON.parse(await (await par[1].getFile()).text()));
         n += res.n; res.cambiaron.forEach(function (id) { cambiaron[id] = true; });
+        res.conflictos.forEach(function (x) { conflictosT.push(x); });
       } catch (e) { malos++; if (window.console) console.error(e); }
     }
   }
@@ -3863,7 +3911,8 @@ async function traerCampo() {
   if (!archivos) { toast('No hay respaldos de campo en las carpetas P2 de los centros.'); return; }
   toast(plural(archivos, 'respaldo de campo revisado', 'respaldos de campo revisados') + ': ' +
     (ids.length ? plural(ok, 'evaluación actualizada', 'evaluaciones actualizadas') + ' en la carpeta' : 'no hay cambios nuevos') +
-    (malos ? '; ' + plural(malos, 'archivo no se pudo leer', 'archivos no se pudieron leer') : '') + '.');
+    (malos ? '; ' + plural(malos, 'archivo no se pudo leer', 'archivos no se pudieron leer') : '') +
+    (conflictosT.length ? '. Atención: hay dos evaluaciones de ' + conflictosT.join(', ') + '; sus archivos no se escribieron hasta que dejes una' : '') + '.');
 }
 
 /* Lee lo recibido: respaldos .json, evaluaciones de campo .txt con sus fotos .jpg, o un .zip con todo (p. ej. «Descargar todo» de Gmail) */
@@ -3900,10 +3949,11 @@ async function importar(input) {
     try { recibidos = await leerRecibidos(lista); } catch (e) { toast('No se pudo leer el archivo.'); return; }
     if (!recibidos.length) { toast('Esos archivos no son un respaldo ni una evaluación de este aplicativo.'); return; }
     let n = 0, nf = 0, faltan = 0;
-    const cambiaron = {};
+    const cambiaron = {}, conflictos = [];
     for (const r of recibidos) {
       const res = await incorporar(r.j);
       n += res.n; nf += res.nf; res.cambiaron.forEach(function (id) { cambiaron[id] = true; });
+      res.conflictos.forEach(function (x) { conflictos.push(x); });
       if (r.j.fotosArchivo) faltan += Object.keys(r.j.fotosArchivo).length - Object.keys(r.j.fotosBlob || {}).length;
     }
     guardarCasos();
@@ -3921,7 +3971,8 @@ async function importar(input) {
     render(false);
     toast((n ? 'Se cargaron ' + plural(n, 'evaluación', 'evaluaciones') + (nf ? ' y ' + plural(nf, 'foto', 'fotos') : '') : 'No había evaluaciones nuevas') +
       (guardadas ? '; ' + plural(guardadas, 'evaluación escrita', 'evaluaciones escritas') + ' en la carpeta' : '') +
-      (faltan > 0 ? '. Faltan ' + plural(faltan, 'foto', 'fotos') + ': carga también los demás adjuntos del correo' : '') + '.');
+      (faltan > 0 ? '. Faltan ' + plural(faltan, 'foto', 'fotos') + ': carga también los demás adjuntos del correo' : '') +
+      (conflictos.length ? '. Atención: hay dos evaluaciones de ' + conflictos.join(', ') + '; sus archivos no se escribieron hasta que dejes una' : '') + '.');
   });
 }
 
@@ -4553,6 +4604,124 @@ async function excelBlob(lista, consolidado) {
   const buf = await wb.xlsx.writeBuffer();
   return new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
 }
+
+/* ---------- varias evaluaciones en curso y varias personas ----------
+   Cada evaluación en curso se guarda en su propia clave del navegador: se pueden tener varias abiertas a la vez
+   y una pestaña no pisa a otra. La lista de evaluaciones guardadas se une con la del disco antes de escribirla. */
+const LS_BORR_PREF = 'valhab6.coopi.borrador.';
+const LS_BORRADAS = 'valhab6.coopi.borradas';
+let borradores = {};
+
+function guardarBorr() {
+  if (!borr || !borr.id) return;
+  borr._mod = Date.now();
+  borradores[borr.id] = borr;
+  lsSet(LS_BORR_PREF + borr.id, borr);
+}
+function quitarBorr(id) {
+  if (!id) return;
+  delete borradores[id];
+  lsSet(LS_BORR_PREF + id, null);
+  delete mem[LS_BORR_PREF + id];
+  if (borr && borr.id === id) borr = null;
+}
+function listaBorradores() {
+  return Object.keys(borradores).map(function (k) { return borradores[k]; })
+    .sort(function (a, b) { return (b._mod || 0) - (a._mod || 0); });
+}
+function cargarBorradores() {
+  borradores = {};
+  try {
+    const claves = [];
+    for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k && k.indexOf(LS_BORR_PREF) === 0) claves.push(k); }
+    claves.forEach(function (k) { const b = lsGet(k); if (b && b.id) borradores[b.id] = normalizarCaso(b); });
+  } catch (e) { /* sin almacenamiento: quedan en memoria */ }
+  // Borrador único de la versión anterior
+  const viejo = lsGet(LS_BORR);
+  if (viejo && viejo.id && !borradores[viejo.id]) { borradores[viejo.id] = normalizarCaso(viejo); lsSet(LS_BORR_PREF + viejo.id, borradores[viejo.id]); }
+  if (viejo) lsSet(LS_BORR, null);
+}
+/* Fotos que siguen en uso en una evaluación guardada o en otra evaluación en curso */
+function fotosEnUso(exceptoBorrId) {
+  const uso = {};
+  casos.forEach(function (c) { (c.fotos || []).forEach(function (f) { uso[f.id] = true; }); });
+  listaBorradores().forEach(function (b) { if (b.id !== exceptoBorrId) (b.fotos || []).forEach(function (f) { uso[f.id] = true; }); });
+  return uso;
+}
+/* Otra evaluación del mismo centro: guardada o en curso en este dispositivo */
+function otraDelCentro(centro, id) {
+  if (!centro) return null;
+  const g = casos.filter(function (c) { return c.id !== id && c.centro === centro; })[0];
+  if (g) return { tipo: 'guardada', c: g };
+  const b = listaBorradores().filter(function (x) { return x.id !== id && x.centro === centro; })[0];
+  return b ? { tipo: 'curso', c: b } : null;
+}
+function textoOtraDelCentro(centro, o) {
+  return o.tipo === 'guardada'
+    ? 'El centro ' + centro + ' ya tiene la evaluación ' + o.c.codigo + '. Para una nueva visita o una corrección, edítala y sube la versión.'
+    : 'El centro ' + centro + ' ya tiene una evaluación en curso en este dispositivo. Continúala desde la lista de evaluaciones.';
+}
+/* Evaluaciones guardadas de un mismo centro que vienen de personas distintas */
+function duplicadosDe(c) {
+  return c && c.centro ? casos.filter(function (x) { return x.id !== c.id && x.centro === c.centro; }) : [];
+}
+function iniciales(nombre) {
+  const p = String(nombre || '').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^A-Za-z ]+/g, ' ').trim().split(/\s+/).filter(Boolean);
+  return p.length ? p.slice(0, 3).map(function (x) { return x[0].toUpperCase(); }).join('') : 'SN';
+}
+
+function guardarCasos() {
+  let disco = null;
+  try { const v = localStorage.getItem(LS_CASOS); disco = v ? JSON.parse(v) : null; } catch (e) { disco = null; }
+  if (Array.isArray(disco)) {
+    const borradas = lsGet(LS_BORRADAS) || {};
+    const pos = {};
+    casos.forEach(function (c, i) { pos[c.id] = i; });
+    disco.forEach(function (d) {
+      if (!d || !d.id || borradas[d.id]) return;
+      if (pos[d.id] === undefined) { casos.push(normalizarCaso(d)); pos[d.id] = casos.length - 1; }
+      else if ((d.mod || 0) > (casos[pos[d.id]].mod || 0)) casos[pos[d.id]] = normalizarCaso(d);
+    });
+  }
+  lsSet(LS_CASOS, casos);
+}
+function marcarBorrada(id) {
+  const b = lsGet(LS_BORRADAS) || {};
+  b[id] = Date.now();
+  lsSet(LS_BORRADAS, b);
+}
+function desmarcarBorrada(id) {
+  const b = lsGet(LS_BORRADAS);
+  if (b && b[id]) { delete b[id]; lsSet(LS_BORRADAS, b); }
+}
+
+/* Otra pestaña del mismo dispositivo cambió algo: se actualiza la lista sin tocar lo que se está editando aquí */
+window.addEventListener('storage', function (e) {
+  if (!e.key) return;
+  if (e.key.indexOf(LS_BORR_PREF) === 0) {
+    const id = e.key.slice(LS_BORR_PREF.length);
+    if (borr && borr.id === id && V.vista === 'asistente') return;
+    if (e.newValue) { try { borradores[id] = normalizarCaso(JSON.parse(e.newValue)); } catch (x) { return; } }
+    else delete borradores[id];
+    if (V.vista === 'inicio') render(false);
+  } else if (e.key === LS_CASOS) {
+    try {
+      const d = JSON.parse(e.newValue || '[]');
+      if (Array.isArray(d)) {
+        const borradas = lsGet(LS_BORRADAS) || {};
+        const pos = {};
+        casos.forEach(function (c, i) { pos[c.id] = i; });
+        d.forEach(function (x) {
+          if (!x || !x.id || borradas[x.id]) return;
+          if (pos[x.id] === undefined) casos.push(normalizarCaso(x));
+          else if ((x.mod || 0) > (casos[pos[x.id]].mod || 0)) casos[pos[x.id]] = normalizarCaso(x);
+        });
+        casos = casos.filter(function (c) { return !borradas[c.id]; });
+      }
+    } catch (x) { return; }
+    if (V.vista === 'inicio') render(false);
+  }
+});
 
 /* ---------- arranque ---------- */
 cargar();
